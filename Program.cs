@@ -66,18 +66,13 @@ categories: {2}
                     .ToArray();
 
                 var firstCategory = allCategories.Where(c1 => categories.Any(c2 => c2 == c1.Attribute(XName.Get("id")).Value))
-                    .Select(c1 => c1.Elements().First().Value)
-                    .ToArray()
-                    .FirstOrDefault();
+                    .Select(c1 => c1.Elements().First().Value);
                 
-                if(firstCategory != null)
-                    firstCategory = firstCategory.Replace(" ", "-");
-
                 var markdown = FormatCode(ConvertHtmlToMarkdown(content));
 
                 var blog = string.Format(postFormat, title, dateCreated, string.Join(", ", firstCategory), markdown);
                 
-                using (var sw = File.CreateText (Path.Combine(outputPath, dateCreated + "-" + postname + ".markdown")))
+                using (var sw = File.CreateText (Path.Combine(outputPath, dateCreated + "-" + postname + ".md")))
                 {
                     sw.Write(blog);
                 };
