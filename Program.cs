@@ -47,9 +47,10 @@ categories: {2}
                 .Elements()
                 .ToArray();
 
-            if (!Directory.Exists("output"))
+            var outputPath = args.Length > 1 ? args[1] : "output";
+            if (!Directory.Exists(outputPath))
             {
-                Directory.CreateDirectory("output");
+                Directory.CreateDirectory(outputPath);
             }
 
             foreach (var post in posts)
@@ -76,7 +77,7 @@ categories: {2}
 
                 var blog = string.Format(postFormat, title, dateCreated, string.Join(", ", firstCategory), markdown);
                 
-                using (var sw = File.CreateText ("output\\" + dateCreated + "-" + postname + ".markdown"))
+                using (var sw = File.CreateText (Path.Combine(outputPath, dateCreated + "-" + postname + ".markdown")))
                 {
                     sw.Write(blog);
                 };
