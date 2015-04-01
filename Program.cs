@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -25,6 +26,16 @@ redirect_from:
 ";
         private const string blogMLNamespace = "http://www.blogml.com/2006/09/BlogML";
 
+        private class Post {
+            public string Id { get; set; }
+            public string Title { get; set; }
+            public string Content { get; set; }
+            public DateTime CreatedAt { get; set; }
+            public string LegacyUrl { get; set; }
+            public string Name { get; set; }
+            public string[] Categories { get; set; }
+        }
+
         private static void Main(string[] args) {
             string documentContent;
             using (var sr = new StreamReader(args[0])) {
@@ -36,47 +47,51 @@ redirect_from:
                 CheckCharacters = false,
             }));
 
-            var allCategories = document.Root.Elements(XName.Get("categories", blogMLNamespace))
+            var allCategories = document.Root
+                .Elements(XName.Get("categories", blogMLNamespace))
                 .Elements()
-                .ToArray();
-
-            var posts = document.Root.Elements(XName.Get("posts", blogMLNamespace))
-                .Elements()
-                .ToArray();
+                .ToDictionary(c => c.Attribute(XName.Get("id")).Value, c => c.Elements().First().Value);
 
             var outputPath = args.Length > 1 ? args[1] : "output";
             if (!Directory.Exists(outputPath)) {
                 Directory.CreateDirectory(outputPath);
             }
 
-            //foreach (var post in posts) {
-            Parallel.ForEach(posts, post => {
-                var id = post.Attribute("id").Value;
-                var dateCreated = DateTime.Parse(post.Attribute("date-created").Value);
-                var title = post.Descendants(XName.Get("title", blogMLNamespace)).First().Value;
-                var content = post.Descendants(XName.Get("content", blogMLNamespace)).First().Value;
+            var posts = new List<Post>();
+            foreach (var post in document.Root.Elements(XName.Get("posts", blogMLNamespace)).Elements()) {
                 var url = post.Attribute("post-url").Value;
-                var postname = url.Substring(url.LastIndexOf("/") + 1).Replace(".aspx", "");
+                var title = post.Descendants(XName.Get("title", blogMLNamespace)).First().Value;
+                var p = new Post {
+                    Id = post.Attribute("id").Value,
+                    CreatedAt = DateTime.Parse(post.Attribute("date-created").Value),
+                    Title = title,
+                    Content = post.Descendants(XName.Get("content", blogMLNamespace)).First().Value,
+                    LegacyUrl = url,
+                    Name = SlugConverter.TitleToSlug(title),
+                    Categories = post
+                        .Descendants(XName.Get("category", blogMLNamespace))
+                        .Select(c1 => c1.Attribute("ref").Value)
+                        .Select(catId => allCategories[catId])
+                        .ToArray()
+                };
+                posts.Add(p);
+            }
 
-                var categories = post.Descendants(XName.Get("category", blogMLNamespace))
-                    .Select(c1 => c1.Attribute("ref").Value)
-                    .ToArray();
-
-                var categoryNames = allCategories.Where(c1 => categories.Any(c2 => c2 == c1.Attribute(XName.Get("id")).Value))
-                    .Select(c1 => c1.Elements().First().Value);
-
+            Parallel.ForEach(posts, post => {
+                var content = post.Content;
                 content = content.Replace("<br>", "<br />");
                 content = ReplaceTags(content);
                 var markdown = FormatCode(ConvertHtmlToMarkdown(content));
 
-                title = title.Replace(":", "&#58;").Replace("'", "''");
-                var blog = string.Format(postFormat, title, dateCreated.ToString("yyyy-MM-dd HH:mm:ss zz"), string.Join(", ", categoryNames), markdown, id, url);
+                var title = post.Title.Replace(":", "&#58;").Replace("'", "''");
+                var blog = string.Format(postFormat, title, post.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss zz"), string.Join(", ", post.Categories),
+                    markdown, post.Id, post.LegacyUrl);
 
-                var path = Path.Combine(outputPath, dateCreated.Year.ToString());
+                var path = Path.Combine(outputPath, post.CreatedAt.Year.ToString());
                 if (!Directory.Exists(path)) {
                     Directory.CreateDirectory(path);
                 }
-                using (var sw = File.CreateText(Path.Combine(path, dateCreated.ToString("yyyy-MM-dd") + "-" + postname + ".md"))) {
+                using (var sw = File.CreateText(Path.Combine(path, post.CreatedAt.ToString("yyyy-MM-dd") + "-" + post.Name + ".md"))) {
                     sw.Write(blog);
                 }
             });
