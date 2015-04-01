@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -9,35 +8,33 @@ using System.Threading.Tasks;
 using System.Xml;
 using System.Xml.Linq;
 
-namespace BlogMLToMarkdown
-{
-    class Program
-    {
+namespace BlogMLToMarkdown {
+    internal class Program {
         private const string postFormat = @"---
 layout: post
-title: ""{0}""
+title: '{0}'
 date: {1}
 comments: true
-categories: {2}
+disqus_identifier: {4}
+categories: [{2}]
+redirect_from:
+  - {5}/
 ---
 
 {3}
 ";
         private const string blogMLNamespace = "http://www.blogml.com/2006/09/BlogML";
 
-        static void Main(string[] args)
-        {
-            string documentContent = null;
-            using(var sr = new StreamReader(args[0]))
-            {
+        private static void Main(string[] args) {
+            string documentContent;
+            using (var sr = new StreamReader(args[0])) {
                 documentContent = sr.ReadToEnd();
             }
 
-            var document = XDocument.Load(XmlReader.Create(new StringReader(documentContent), new XmlReaderSettings
-                {
-                    IgnoreComments = true,
-                    CheckCharacters = false,
-                }));
+            var document = XDocument.Load(XmlReader.Create(new StringReader(documentContent), new XmlReaderSettings {
+                IgnoreComments = true,
+                CheckCharacters = false,
+            }));
 
             var allCategories = document.Root.Elements(XName.Get("categories", blogMLNamespace))
                 .Elements()
@@ -48,44 +45,67 @@ categories: {2}
                 .ToArray();
 
             var outputPath = args.Length > 1 ? args[1] : "output";
-            if (!Directory.Exists(outputPath))
-            {
+            if (!Directory.Exists(outputPath)) {
                 Directory.CreateDirectory(outputPath);
             }
 
-            foreach (var post in posts)
-            {
-                var dateCreated = DateTime.Parse(post.Attribute("date-created").Value).ToString("yyyy-MM-dd");
+            //foreach (var post in posts) {
+            Parallel.ForEach(posts, post => {
+                var id = post.Attribute("id").Value;
+                var dateCreated = DateTime.Parse(post.Attribute("date-created").Value);
                 var title = post.Descendants(XName.Get("title", blogMLNamespace)).First().Value;
                 var content = post.Descendants(XName.Get("content", blogMLNamespace)).First().Value;
                 var url = post.Attribute("post-url").Value;
                 var postname = url.Substring(url.LastIndexOf("/") + 1).Replace(".aspx", "");
-               
+
                 var categories = post.Descendants(XName.Get("category", blogMLNamespace))
                     .Select(c1 => c1.Attribute("ref").Value)
                     .ToArray();
 
-                var firstCategory = allCategories.Where(c1 => categories.Any(c2 => c2 == c1.Attribute(XName.Get("id")).Value))
+                var categoryNames = allCategories.Where(c1 => categories.Any(c2 => c2 == c1.Attribute(XName.Get("id")).Value))
                     .Select(c1 => c1.Elements().First().Value);
-                
+
+                content = content.Replace("<br>", "<br />");
+                content = ReplaceTags(content);
                 var markdown = FormatCode(ConvertHtmlToMarkdown(content));
 
-                var blog = string.Format(postFormat, title, dateCreated, string.Join(", ", firstCategory), markdown);
-                
-                using (var sw = File.CreateText (Path.Combine(outputPath, dateCreated + "-" + postname + ".md")))
-                {
+                title = title.Replace(":", "&#58;").Replace("'", "''");
+                var blog = string.Format(postFormat, title, dateCreated.ToString("yyyy-MM-dd HH:mm:ss zz"), string.Join(", ", categoryNames), markdown, id, url);
+
+                var path = Path.Combine(outputPath, dateCreated.Year.ToString());
+                if (!Directory.Exists(path)) {
+                    Directory.CreateDirectory(path);
+                }
+                using (var sw = File.CreateText(Path.Combine(path, dateCreated.ToString("yyyy-MM-dd") + "-" + postname + ".md"))) {
                     sw.Write(blog);
-                };
-                
-            }
+                }
+            });
         }
 
-        static string ConvertHtmlToMarkdown(string source)
-        {
-            string args = String.Format(@"-r html -t markdown");
+        private static readonly Regex _tagRegex1 = new Regex(@"\<(pre|PRE) class=""?(?<language>.*?)""?\>(?<code>.*?)\</(pre|PRE)\>",
+            RegexOptions.Compiled | RegexOptions.Singleline);
 
-            var startInfo = new ProcessStartInfo("pandoc.exe", args)
-            {
+        private static readonly Regex _tagRegex2 = new Regex(@"\[code language=(?<language>.*?)\](?<code>.*?)\[/code\]",
+            RegexOptions.Compiled | RegexOptions.Singleline);
+
+        private static string ReplaceTags(string content) {
+            content = _tagRegex1.Replace(content, match => {
+                var language = match.Groups["language"].Value;
+                var code = match.Groups["code"].Value;
+                return "<pre class=" + GetLanguage(language, code) + ">" + code + "</pre>";
+            });
+            content = _tagRegex2.Replace(content, match => {
+                var language = match.Groups["language"].Value;
+                var code = match.Groups["code"].Value;
+                return "<pre class=" + GetLanguage(language, code) + ">" + code + "</pre>";
+            });
+            return content;
+        }
+
+        private static string ConvertHtmlToMarkdown(string source) {
+            string args = String.Format(@"-r html -t markdown_github+pipe_tables-multiline_tables");
+
+            var startInfo = new ProcessStartInfo("pandoc.exe", args) {
                 RedirectStandardOutput = true,
                 RedirectStandardInput = true,
                 UseShellExecute = false
@@ -99,29 +119,36 @@ categories: {2}
             process.StandardInput.Close();
 
             process.WaitForExit(2000);
-            using (var sr = new StreamReader(process.StandardOutput.BaseStream))
-            {
+            using (var sr = new StreamReader(process.StandardOutput.BaseStream)) {
                 return sr.ReadToEnd();
             }
         }
 
-        static readonly Regex _codeRegex = new Regex(@"~~~~ \{\.csharpcode\}(?<code>.*?)~~~~", RegexOptions.Compiled | RegexOptions.Singleline);
+        private static readonly Regex _codeRegex = new Regex(@"~~~~ \{(?<language>.*?)\}(?<code>.*?)~~~~",
+            RegexOptions.Compiled | RegexOptions.Singleline);
 
-        static string FormatCode(string content)
-        {
-            return _codeRegex.Replace(content, match =>
-            {
+        private static string FormatCode(string content) {
+            return _codeRegex.Replace(content, match => {
+                var language = match.Groups["language"].Value;
                 var code = match.Groups["code"].Value;
-                return "```" + GetLanguage(code) + code + "```";
+                return "```" + GetLanguage(language, code) + code + "```";
             });
         }
 
-        static string GetLanguage(string code)
-        {
+        private static string GetLanguage(string language, string code) {
+            language = language.Trim().ToLowerInvariant();
+            if (language.Contains("csharp") || language == "cs" || language == "c#") {
+                return "csharp";
+            } else if (language.Contains("aspx")) {
+                return "aspx-cs";
+            } else if (language.Contains("xml")) {
+                return code.Contains("runat=\"server\"") ? "aspx-cs" : "xml";
+            }
+
             var trimmedCode = code.Trim();
             if (trimmedCode.Contains("<%= ") || trimmedCode.Contains("<%: ")) return "aspx-cs";
             if (trimmedCode.StartsWith("<script") || trimmedCode.StartsWith("<table")) return "html";
-            return "csharp";
+            return String.Empty;
         }
     }
 }
