@@ -42,6 +42,9 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="BlogMLReader.cs" />
+    <Compile Include="ContentConverter.cs" />
+    <Compile Include="Post.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="SlugConverter.cs" />
