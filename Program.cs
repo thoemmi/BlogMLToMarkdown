@@ -1,4 +1,6 @@
-﻿using System.IO;
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -18,15 +20,23 @@ redirect_from:
 {3}
 ";
 
+        public static Uri BaseUri = new Uri("http://thomasfreudenberg.com");
+        public static List<Post> Posts;
+
         private static void Main(string[] args) {
             var outputPath = args.Length > 1 ? args[1] : "output";
             if (!Directory.Exists(outputPath)) {
                 Directory.CreateDirectory(outputPath);
             }
 
-            var posts = BlogMLReader.ReadPosts(args[0]).ToList();
+            Posts = BlogMLReader.ReadPosts(args[0]).ToList();
+            Parallel.ForEach(Posts, post => {
+                post.NewUrl = String.Format("/archive/{0:0000}/{1:00}/{2:00}/{3}/", post.CreatedAt.Year, post.CreatedAt.Month, post.CreatedAt.Day, post.Name);
+            });
 
-            Parallel.ForEach(posts, post => {
+            //ContentConverter.GetMarkdownContent(Posts.First(p => p.Id == "458166"));
+
+            Parallel.ForEach(Posts, post => {
                 var markdown = ContentConverter.GetMarkdownContent(post);
 
                 var title = post.Title.Replace(":", "&#58;").Replace("'", "''");
@@ -41,6 +51,9 @@ redirect_from:
                     sw.Write(blog);
                 }
             });
+
+            Console.WriteLine("Press any key");
+            Console.ReadKey();
         }
     }
 }

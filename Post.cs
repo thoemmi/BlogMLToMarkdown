@@ -9,5 +9,6 @@ namespace BlogMLToMarkdown {
         public string LegacyUrl { get; set; }
         public string Name { get; set; }
         public string[] Categories { get; set; }
+        public string NewUrl { get; set; }
     }
 }

@@ -1,17 +1,57 @@
 ﻿using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using HtmlAgilityPack;
 
 namespace BlogMLToMarkdown {
     public static class ContentConverter {
         public static string GetMarkdownContent(Post post) {
-            var content = post.Content;
+            var content = FixInternalLinks(post.Content);
             content = content.Replace("<br>", "<br />");
             content = FixSyntaxHighlighting(content);
             return FormatCode(ConvertHtmlToMarkdown(content));
+        }
 
+        private static string FixInternalLinks(string content) {
+            var doc = new HtmlDocument();
+            doc.LoadHtml(content);
+
+            var htmlNodeCollection = doc.DocumentNode.SelectNodes("//a[@href]");
+            if (htmlNodeCollection != null) {
+                foreach (var link in htmlNodeCollection) {
+                    var att = link.Attributes["href"];
+                    var url = new Uri(Program.BaseUri, att.Value);
+
+                    if (url.Host != "thomasfreudenberg.com") {
+                        continue;
+                    }
+
+                    var linkedPost = Program.Posts.FirstOrDefault(p => String.Equals(p.LegacyUrl, url.AbsolutePath, StringComparison.OrdinalIgnoreCase));
+                    if (linkedPost != null) {
+                        Console.WriteLine("Found internal link to {0}, replacing with {1}", url.AbsolutePath, linkedPost.NewUrl);
+                        link.Attributes["href"].Value = linkedPost.NewUrl;
+                    } else if (url.AbsolutePath == "/") {
+                        // nothing to do
+                    } else if (url.AbsolutePath == "/blog" || url.AbsolutePath == "/blog/") {
+                        Console.WriteLine("Found internal link to {0}, replacing with /", url.AbsolutePath);
+                        link.Attributes["href"].Value = "/";
+                    } else if (url.AbsolutePath == "/utility/Redirect.aspx") {
+                        var unescapedQuery = url.GetComponents(UriComponents.Query, UriFormat.Unescaped).Substring(2);
+                        Console.WriteLine("Found redirection to {0}", unescapedQuery);
+                        link.Attributes["href"].Value = url.Query;
+                    } else {
+                        Console.WriteLine("Found internal link {0}", url.AbsolutePath);
+                    }
+                }
+            }
+
+            using (var textWriter = new StringWriter()) {
+                doc.Save(textWriter);
+                return textWriter.ToString();
+            }
         }
 
         private static readonly Regex _tagRegex1 = new Regex(@"\<(pre|PRE) class=""?(?<language>.*?)""?\>(?<code>.*?)\</(pre|PRE)\>",
