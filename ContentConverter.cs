@@ -22,35 +22,46 @@ namespace BlogMLToMarkdown {
             var htmlNodeCollection = doc.DocumentNode.SelectNodes("//a[@href]");
             if (htmlNodeCollection != null) {
                 foreach (var link in htmlNodeCollection) {
-                    var att = link.Attributes["href"];
-                    var url = new Uri(Program.BaseUri, att.Value);
-
-                    if (url.Host != "thomasfreudenberg.com") {
-                        continue;
-                    }
-
-                    var linkedPost = Program.Posts.FirstOrDefault(p => String.Equals(p.LegacyUrl, url.AbsolutePath, StringComparison.OrdinalIgnoreCase));
-                    if (linkedPost != null) {
-                        Console.WriteLine("Found internal link to {0}, replacing with {1}", url.AbsolutePath, linkedPost.NewUrl);
-                        link.Attributes["href"].Value = linkedPost.NewUrl;
-                    } else if (url.AbsolutePath == "/") {
-                        // nothing to do
-                    } else if (url.AbsolutePath == "/blog" || url.AbsolutePath == "/blog/") {
-                        Console.WriteLine("Found internal link to {0}, replacing with /", url.AbsolutePath);
-                        link.Attributes["href"].Value = "/";
-                    } else if (url.AbsolutePath == "/utility/Redirect.aspx") {
-                        var unescapedQuery = url.GetComponents(UriComponents.Query, UriFormat.Unescaped).Substring(2);
-                        Console.WriteLine("Found redirection to {0}", unescapedQuery);
-                        link.Attributes["href"].Value = url.Query;
-                    } else {
-                        Console.WriteLine("Found internal link {0}", url.AbsolutePath);
-                    }
+                    FixPostLink(link);
                 }
             }
 
             using (var textWriter = new StringWriter()) {
                 doc.Save(textWriter);
                 return textWriter.ToString();
+            }
+        }
+
+        private static void FixPostLink(HtmlNode link) {
+            var att = link.Attributes["href"];
+            var url = new Uri(Program.BaseUri, att.Value);
+
+            if (url.Host != "thomasfreudenberg.com") {
+                return;
+            }
+
+            var linkedPost = Program.Posts.FirstOrDefault(p => String.Equals(p.LegacyUrl, url.AbsolutePath, StringComparison.OrdinalIgnoreCase));
+            if (linkedPost == null) {
+                var match = Regex.Match(url.AbsolutePath, @"/blog/archive/\d{4}/\d{2}/\d{2}/(\d+)\.aspx");
+                if (match.Success) {
+                    var legaceId = match.Groups[1].Value;
+                    linkedPost = Program.Posts.FirstOrDefault(p => String.Equals(p.Id, legaceId, StringComparison.OrdinalIgnoreCase));
+                }
+            }
+            if (linkedPost != null) {
+                Console.WriteLine("Found internal link to {0}, replacing with {1}", url.AbsolutePath, linkedPost.NewUrl);
+                link.Attributes["href"].Value = linkedPost.NewUrl;
+            } else if (url.AbsolutePath == "/") {
+                // nothing to do
+            } else if (url.AbsolutePath == "/blog" || url.AbsolutePath == "/blog/") {
+                Console.WriteLine("Found internal link to {0}, replacing with /", url.AbsolutePath);
+                link.Attributes["href"].Value = "/";
+            } else if (url.AbsolutePath == "/utility/Redirect.aspx") {
+                var unescapedQuery = url.GetComponents(UriComponents.Query, UriFormat.Unescaped).Substring(2);
+                Console.WriteLine("Found redirection to {0}", unescapedQuery);
+                link.Attributes["href"].Value = url.Query;
+            } else {
+                Console.WriteLine("Found internal link {0}", url.AbsolutePath);
             }
         }
 
