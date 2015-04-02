@@ -24,7 +24,7 @@ namespace BlogMLToMarkdown {
             var htmlNodeCollection = doc.DocumentNode.SelectNodes("//a[@href]");
             if (htmlNodeCollection != null) {
                 foreach (var link in htmlNodeCollection) {
-                    FixPostLink(link);
+                    await FixPostLink(link);
                 }
             }
             htmlNodeCollection = doc.DocumentNode.SelectNodes("//img[@src]");
@@ -40,7 +40,7 @@ namespace BlogMLToMarkdown {
             }
         }
 
-        private static void FixPostLink(HtmlNode link) {
+        private static async Task FixPostLink(HtmlNode link) {
             var att = link.Attributes["href"];
             var url = new Uri(Program.BaseUri, att.Value);
 
@@ -51,6 +51,13 @@ namespace BlogMLToMarkdown {
             var linkedPost = Program.Posts.FirstOrDefault(p => String.Equals(p.LegacyUrl, url.AbsolutePath, StringComparison.OrdinalIgnoreCase));
             if (linkedPost == null) {
                 var match = Regex.Match(url.AbsolutePath, @"/blog/archive/\d{4}/\d{2}/\d{2}/(\d+)\.aspx");
+                if (match.Success) {
+                    var legaceId = match.Groups[1].Value;
+                    linkedPost = Program.Posts.FirstOrDefault(p => String.Equals(p.Id, legaceId, StringComparison.OrdinalIgnoreCase));
+                }
+            }
+            if (linkedPost == null) {
+                var match = Regex.Match(url.AbsolutePath, @"/blog/posts/(\d+)\.aspx");
                 if (match.Success) {
                     var legaceId = match.Groups[1].Value;
                     linkedPost = Program.Posts.FirstOrDefault(p => String.Equals(p.Id, legaceId, StringComparison.OrdinalIgnoreCase));
@@ -70,6 +77,8 @@ namespace BlogMLToMarkdown {
                 link.Attributes["href"].Value = url.Query;
             } else {
                 Console.WriteLine("Found internal link {0}", url.AbsolutePath);
+                var filename = await DownloadFile(link, url);
+                link.Attributes["href"].Value = filename;
             }
         }
 
@@ -81,32 +90,38 @@ namespace BlogMLToMarkdown {
                 return;
             }
 
+            var fileName = await DownloadFile(link, url);
+
+            link.Attributes["src"].Value = fileName;
+        }
+
+        private static async Task<string> DownloadFile(HtmlNode link, Uri url) {
             WebClient wc = new WebClient();
             var bytes = await wc.DownloadDataTaskAsync(url);
-            string fileName = GetFilenameFromHeaderCollection(wc.ResponseHeaders);
-            if (fileName == null) {
+            string filename = GetFilenameFromHeaderCollection(wc.ResponseHeaders);
+            if (filename == null) {
                 if (String.Equals(Path.GetExtension(url.ToString()), ".aspx", StringComparison.OrdinalIgnoreCase)) {
                     var relAttr = link.Attributes["alt"];
                     if (relAttr != null && !String.IsNullOrEmpty(relAttr.Value)) {
                         // create a filename from image's alt= attribute.
-                        fileName = SlugConverter.TitleToSlug(relAttr.Value);
+                        filename = SlugConverter.TitleToSlug(relAttr.Value);
                     } else {
                         // use url for filename
-                        fileName = Path.GetFileNameWithoutExtension(url.ToString());
+                        filename = Path.GetFileNameWithoutExtension(url.ToString());
                     }
                     // add extension based on response's Content-Type
-                    fileName += GetFileExtensionByContentType(wc.ResponseHeaders["Content-Type"]);
+                    filename += GetFileExtensionByContentType(wc.ResponseHeaders["Content-Type"]);
                 } else {
-                    fileName = Path.GetFileName(url.ToString());
+                    filename = Path.GetFileName(url.ToString());
                 }
             }
-            while (fileName.StartsWith(".")) {
-                fileName = fileName.Substring(1);
+            while (filename.StartsWith(".")) {
+                filename = filename.Substring(1);
             }
 
-            Console.WriteLine("Found picture {0}, new filename {1}", url.AbsolutePath, fileName);
+            Console.WriteLine("Found picture {0}, new filename {1}", url.AbsolutePath, filename);
 
-            var path = Path.Combine(Program.BinariesPath, fileName);
+            var path = Path.Combine(Program.BinariesPath, filename);
 
             if (!File.Exists(path)) {
                 File.WriteAllBytes(path, bytes);
@@ -117,8 +132,7 @@ namespace BlogMLToMarkdown {
                     File.SetLastWriteTime(path, lastModified);
                 }
             }
-
-            link.Attributes["src"].Value = "/files/archive/" + fileName;
+            return "/files/archive/" + filename;
         }
 
         private static string GetFilenameFromHeaderCollection(WebHeaderCollection headers) {
