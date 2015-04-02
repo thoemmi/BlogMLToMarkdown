@@ -2,20 +2,22 @@
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using HtmlAgilityPack;
 
 namespace BlogMLToMarkdown {
     public static class ContentConverter {
-        public static string GetMarkdownContent(Post post) {
-            var content = FixInternalLinks(post.Content);
+        public static async Task<string> GetMarkdownContent(Post post) {
+            var content = await FixInternalLinks(post.Content);
             content = content.Replace("<br>", "<br />");
             content = FixSyntaxHighlighting(content);
             return FormatCode(ConvertHtmlToMarkdown(content));
         }
 
-        private static string FixInternalLinks(string content) {
+        private static async Task<string> FixInternalLinks(string content) {
             var doc = new HtmlDocument();
             doc.LoadHtml(content);
 
@@ -23,6 +25,12 @@ namespace BlogMLToMarkdown {
             if (htmlNodeCollection != null) {
                 foreach (var link in htmlNodeCollection) {
                     FixPostLink(link);
+                }
+            }
+            htmlNodeCollection = doc.DocumentNode.SelectNodes("//img[@src]");
+            if (htmlNodeCollection != null) {
+                foreach (var link in htmlNodeCollection) {
+                    await FixImageLink(link);
                 }
             }
 
@@ -62,6 +70,79 @@ namespace BlogMLToMarkdown {
                 link.Attributes["href"].Value = url.Query;
             } else {
                 Console.WriteLine("Found internal link {0}", url.AbsolutePath);
+            }
+        }
+
+        private static async Task FixImageLink(HtmlNode link) {
+            var att = link.Attributes["src"];
+            var url = new Uri(Program.BaseUri, att.Value);
+
+            if (url.Host != "thomasfreudenberg.com") {
+                return;
+            }
+
+            WebClient wc = new WebClient();
+            var bytes = await wc.DownloadDataTaskAsync(url);
+            string fileName = GetFilenameFromHeaderCollection(wc.ResponseHeaders);
+            if (fileName == null) {
+                if (String.Equals(Path.GetExtension(url.ToString()), ".aspx", StringComparison.OrdinalIgnoreCase)) {
+                    var relAttr = link.Attributes["alt"];
+                    if (relAttr != null && !String.IsNullOrEmpty(relAttr.Value)) {
+                        // create a filename from image's alt= attribute.
+                        fileName = SlugConverter.TitleToSlug(relAttr.Value);
+                    } else {
+                        // use url for filename
+                        fileName = Path.GetFileNameWithoutExtension(url.ToString());
+                    }
+                    // add extension based on response's Content-Type
+                    fileName += GetFileExtensionByContentType(wc.ResponseHeaders["Content-Type"]);
+                } else {
+                    fileName = Path.GetFileName(url.ToString());
+                }
+            }
+            while (fileName.StartsWith(".")) {
+                fileName = fileName.Substring(1);
+            }
+
+            Console.WriteLine("Found picture {0}, new filename {1}", url.AbsolutePath, fileName);
+
+            var path = Path.Combine(Program.BinariesPath, fileName);
+
+            if (!File.Exists(path)) {
+                File.WriteAllBytes(path, bytes);
+
+                DateTime lastModified;
+                if (!string.IsNullOrEmpty(wc.ResponseHeaders[HttpResponseHeader.LastModified]) &&
+                    DateTime.TryParse(wc.ResponseHeaders[HttpResponseHeader.LastModified], out lastModified)) {
+                    File.SetLastWriteTime(path, lastModified);
+                }
+            }
+
+            link.Attributes["src"].Value = "/files/archive/" + fileName;
+        }
+
+        private static string GetFilenameFromHeaderCollection(WebHeaderCollection headers) {
+            string fileName = null;
+            var contentDisposition = headers["Content-disposition"];
+            if (contentDisposition != null) {
+                int pos;
+                if ((pos = contentDisposition.IndexOf("filename=", StringComparison.OrdinalIgnoreCase)) > 0) {
+                    fileName = contentDisposition.Substring(pos + "filename=".Length);
+                    fileName = fileName.Replace("\"", "");
+                }
+            }
+            if (string.IsNullOrEmpty(fileName)) {
+                fileName = headers["Location"] != null ? Path.GetFileName(headers["Location"]) : null;
+            }
+            return fileName;
+        }
+
+        private static string GetFileExtensionByContentType(string contentType) {
+            switch (contentType) {
+                case "image/jpeg":
+                    return ".jpeg";
+                default:
+                    return ".bin";
             }
         }
 
