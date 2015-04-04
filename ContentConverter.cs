@@ -11,10 +11,34 @@ using HtmlAgilityPack;
 namespace BlogMLToMarkdown {
     public static class ContentConverter {
         public static async Task<string> GetMarkdownContent(Post post) {
-            var content = await FixInternalLinks(post.Content);
+            var content = post.Content;
+            content = await PreProcessContent(content);
+            content = await FixInternalLinks(content);
             content = content.Replace("<br>", "<br />");
             content = FixSyntaxHighlighting(content);
             return FormatCode(ConvertHtmlToMarkdown(content));
+        }
+
+        private static async Task<string> PreProcessContent(string content) {
+            content = Regex.Replace(content, @"\[download:(\d+)\]", match => {
+                var downloadId = match.Groups[1].Value;
+                var url = new Uri(Program.BaseUri, String.Format("/files/folders/{0}/download.aspx", downloadId));
+                var filename = DownloadFile(null, url, true).Result;
+                var s = String.Format("<a href=\"/files/folders/{0}/download.aspx\">{1}</a>", downloadId, Path.GetFileName(filename));
+                return s;
+            });
+            content = Regex.Replace(content, @"\[downloadlink:(\d+):(.+?)\]", match => {
+                var downloadId = match.Groups[1].Value;
+                var description = match.Groups[2].Value;
+                var s = String.Format("<a href=\"/files/folders/{0}/download.aspx\">{1}</a>", downloadId, description);
+                return s;
+            });
+            content = Regex.Replace(content, @"\[wikipedia:(.+?)\]", match => {
+                var s = String.Format("<a href=\"http://en.wikipedia.org/wiki/{0}\">{0}</a>", match.Groups[1].Value);
+                return s;
+            });
+
+            return content;
         }
 
         private static async Task<string> FixInternalLinks(string content) {
@@ -77,7 +101,7 @@ namespace BlogMLToMarkdown {
                 link.Attributes["href"].Value = url.Query;
             } else {
                 Console.WriteLine("Found internal link {0}", url.AbsolutePath);
-                var filename = await DownloadFile(link, url);
+                var filename = await DownloadFile(link, url, false);
                 link.Attributes["href"].Value = filename;
             }
         }
@@ -90,18 +114,18 @@ namespace BlogMLToMarkdown {
                 return;
             }
 
-            var fileName = await DownloadFile(link, url);
+            var fileName = await DownloadFile(link, url, false);
 
             link.Attributes["src"].Value = fileName;
         }
 
-        private static async Task<string> DownloadFile(HtmlNode link, Uri url) {
-            WebClient wc = new WebClient();
+        private static async Task<string> DownloadFile(HtmlNode link, Uri url, bool headerOnly) {
+            WebClient wc = new WebClientWithVerb(headerOnly);
             var bytes = await wc.DownloadDataTaskAsync(url);
             string filename = GetFilenameFromHeaderCollection(wc.ResponseHeaders);
             if (filename == null) {
                 if (String.Equals(Path.GetExtension(url.ToString()), ".aspx", StringComparison.OrdinalIgnoreCase)) {
-                    var relAttr = link.Attributes["alt"];
+                    var relAttr = link?.Attributes["alt"];
                     if (relAttr != null && !String.IsNullOrEmpty(relAttr.Value)) {
                         // create a filename from image's alt= attribute.
                         filename = SlugConverter.TitleToSlug(relAttr.Value);
@@ -118,21 +142,40 @@ namespace BlogMLToMarkdown {
             while (filename.StartsWith(".")) {
                 filename = filename.Substring(1);
             }
+            filename = filename.Replace("%20", String.Empty);
 
             Console.WriteLine("Found picture {0}, new filename {1}", url.AbsolutePath, filename);
 
-            var path = Path.Combine(Program.BinariesPath, filename);
+            if (!headerOnly) {
+                var path = Path.Combine(Program.BinariesPath, filename);
+                if (!File.Exists(path)) {
+                    File.WriteAllBytes(path, bytes);
 
-            if (!File.Exists(path)) {
-                File.WriteAllBytes(path, bytes);
-
-                DateTime lastModified;
-                if (!string.IsNullOrEmpty(wc.ResponseHeaders[HttpResponseHeader.LastModified]) &&
-                    DateTime.TryParse(wc.ResponseHeaders[HttpResponseHeader.LastModified], out lastModified)) {
-                    File.SetLastWriteTime(path, lastModified);
+                    DateTime lastModified;
+                    if (!string.IsNullOrEmpty(wc.ResponseHeaders[HttpResponseHeader.LastModified]) &&
+                        DateTime.TryParse(wc.ResponseHeaders[HttpResponseHeader.LastModified], out lastModified)) {
+                        File.SetLastWriteTime(path, lastModified);
+                    }
                 }
             }
+
             return "/files/archive/" + filename;
+        }
+
+        private class WebClientWithVerb : WebClient {
+            private readonly bool _headerOnly;
+
+            public WebClientWithVerb(bool headerOnly) {
+                _headerOnly = headerOnly;
+            }
+
+            protected override WebRequest GetWebRequest(Uri address) {
+                var webRequest = base.GetWebRequest(address);
+                if (_headerOnly) {
+                    webRequest.Method = "HEAD";
+                }
+                return webRequest;
+            }
         }
 
         private static string GetFilenameFromHeaderCollection(WebHeaderCollection headers) {
