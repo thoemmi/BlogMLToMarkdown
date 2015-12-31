@@ -1,5 +1,13 @@
 BlogMLToMarkdown
 ================
 
-A c# command line tool for transforming a Blog ML document to markdown documents for Jekyll. It uses pandoc for transforming HTML into Markdown. It's not perfect but you will get a good looking markdown document with few issues (specially for code snippets). This tool does not export comments.
+A C# command line tool for transforming a Blog ML document to markdown documents 
+for Jekyll or Pretzel. It uses pandoc for transforming HTML into Markdown. 
+
+It's a customized version of [BlogMLToMarkdown](https://github.com/pcibraro/BlogMLToMarkdown),
+but with changes very specific to my requirements:
+For each blog post in BlogML.xml, it tries to download images, attachments etc from the 
+original site and updates the links.
+
+Comments are written to ```disqus.wxr``` to be imported in Disqus.
   
