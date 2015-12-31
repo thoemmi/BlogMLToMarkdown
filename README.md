@@ -9,5 +9,5 @@ but with changes very specific to my requirements:
 For each blog post in BlogML.xml, it tries to download images, attachments etc from the 
 original site and updates the links.
 
-Comments are written to ```disqus.wxr``` to be imported in Disqus.
+Comments are written to `disqus.wxr` to be imported in Disqus.
   
