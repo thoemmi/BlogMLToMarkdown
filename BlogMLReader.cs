@@ -39,8 +39,31 @@ namespace BlogMLToMarkdown {
                         .Descendants(XName.Get("category", blogMLNamespace))
                         .Select(c1 => c1.Attribute("ref").Value)
                         .Select(catId => allCategories[catId])
+                        .ToArray(),
+                        Comments = post
+                        .Descendants(XName.Get("comment", blogMLNamespace))
+                        .Where(c => c.Attribute("approved").Value == "true")
+                        .Select(c => new Comment {
+                            Id = c.Attribute("id").Value,
+                            Author = c.Attribute("user-name").Value,
+                            AuthorUrl= c.Attribute("user-url")?.Value,
+                            Content = c.Element(XName.Get("content", blogMLNamespace)).Value,
+                            CreatedAt = DateTime.Parse(post.Attribute("date-created").Value),
+                        })
                         .ToArray()
                 };
+
+                foreach (var comment in p.Comments) {
+                    if (comment.Author.Equals("Thomas Freudenberg", StringComparison.OrdinalIgnoreCase) || comment.Author.Equals("thoemmi", StringComparison.OrdinalIgnoreCase)) {
+                        comment.AuthorEmail = "info@thomasfreudenberg.com";
+                        comment.AuthorUrl = "http://thomasfreudenberg.com";
+                    } else if (comment.Author == "http://") {
+                        comment.Author = null;
+                        comment.AuthorEmail = null;
+                        comment.AuthorUrl = null;
+                    }
+                }
+
                 yield return p;
             }
         }
